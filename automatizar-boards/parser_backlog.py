@@ -1,0 +1,493 @@
+import sys
+import os
+import re
+import html
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+
+# Garante suporte a UTF-8 no terminal Windows
+if sys.stdout.encoding != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
+
+def clean_title(text: str) -> str:
+    """
+    Remove qualquer emoji, ícone, crases ou símbolo decorativo de títulos para o Azure Boards.
+    Garante títulos 100% limpos e formais.
+    """
+    if not text:
+        return ""
+    # Remove faixa completa de emojis e símbolos especiais Unicode
+    cleaned = re.sub(r"[\U00010000-\U0010ffff]", "", text)  # Emojis 4-byte
+    cleaned = re.sub(r"[\u2600-\u27BF\u2300-\u23FF\u2B50-\u2B55\u200d\uFE0F\u00A9\u00AE]", "", cleaned)  # Símbolos, dingbats
+    cleaned = cleaned.replace("`", "").replace("'", "").replace('"', "")
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
+@dataclass
+class TaskItem:
+    title: str
+    description: str = ""
+    work_item_type: str = "Task"
+    tags: List[str] = field(default_factory=list)
+
+
+@dataclass
+class PBIItem:
+    title: str
+    description: str = ""
+    acceptance_criteria: str = ""
+    story_points: float = 0.0
+    priority: int = 2
+    business_value: int = 80
+    tags: List[str] = field(default_factory=list)
+    work_item_type: str = "Product Backlog Item"
+    parent_feature_ref: str = ""
+    tasks: List[TaskItem] = field(default_factory=list)
+
+
+@dataclass
+class FeatureItem:
+    title: str
+    code: str = ""
+    description: str = ""
+    acceptance_criteria: str = ""
+    effort: float = 0.0
+    priority: int = 1
+    business_value: int = 100
+    tags: List[str] = field(default_factory=list)
+    work_item_type: str = "Feature"
+    pbis: List[PBIItem] = field(default_factory=list)
+
+
+@dataclass
+class EpicItem:
+    title: str
+    description: str = ""
+    acceptance_criteria: str = ""
+    effort: float = 0.0
+    priority: int = 1
+    business_value: int = 100
+    tags: List[str] = field(default_factory=list)
+    work_item_type: str = "Epic"
+    features: List[FeatureItem] = field(default_factory=list)
+
+
+@dataclass
+class BacklogDocument:
+    discipline: str
+    epic: EpicItem
+    raw_file_path: str = ""
+
+
+def _markdown_to_clean_html(text: str) -> str:
+    """
+    Converte markdown para HTML limpo sem estilizações invasivas (sem barras azuis, sem títulos extras).
+    """
+    if not text:
+        return ""
+    
+    lines = text.strip().split("\n")
+    html_parts = []
+    in_list = False
+    paragraph_buffer = []
+
+    def flush_paragraph():
+        nonlocal paragraph_buffer
+        if paragraph_buffer:
+            p_text = "<br/>".join(paragraph_buffer)
+            html_parts.append(f"<div>{p_text}</div>")
+            paragraph_buffer = []
+
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            flush_paragraph()
+            continue
+
+        # Lista de itens (- [ ], * ou -)
+        if stripped.startswith("- [ ]") or stripped.startswith("- [x]") or stripped.startswith("* ") or stripped.startswith("- "):
+            flush_paragraph()
+            if not in_list:
+                html_parts.append("<ul>")
+                in_list = True
+            item_text = re.sub(r"^(-\s*\[[ xX]\]\s*|[\*\-]\s*)", "", stripped)
+            item_text = _format_inline_markdown(item_text)
+            html_parts.append(f"<li>{item_text}</li>")
+        else:
+            if in_list:
+                html_parts.append("</ul>")
+                in_list = False
+            
+            # Remove marcadores de citação (>) para não gerar barras laterais azuis
+            clean_line = re.sub(r"^>\s*", "", stripped)
+            formatted_line = _format_inline_markdown(clean_line)
+            paragraph_buffer.append(formatted_line)
+
+    if in_list:
+        html_parts.append("</ul>")
+    flush_paragraph()
+
+    return "".join(html_parts)
+
+
+def _format_inline_markdown(text: str) -> str:
+    """Formata tags inline como negrito, itálico e código."""
+    t = html.escape(text)
+    t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+    t = re.sub(r"__(.+?)__", r"<strong>\1</strong>", t)
+    t = re.sub(r"\*(.+?)\*", r"<em>\1</em>", t)
+    t = re.sub(r"_(.+?)_", r"<em>\1</em>", t)
+    t = re.sub(r"`(.+?)`", r"<code>\1</code>", t)
+    return t
+
+
+def _parse_priority(raw_priority: str) -> int:
+    """Converte strings de prioridade em inteiros de 1 a 4."""
+    if not raw_priority:
+        return 2
+    raw = raw_priority.lower().replace("`", "").replace("'", "").replace('"', "").strip()
+    if "1" in raw or "crit" in raw or "urgent" in raw:
+        return 1
+    elif "2" in raw or "high" in raw or "alta" in raw:
+        return 2
+    elif "3" in raw or "medium" in raw or "media" in raw or "média" in raw:
+        return 3
+    elif "4" in raw or "low" in raw or "baixa" in raw:
+        return 4
+    return 2
+
+
+def _priority_to_business_value(priority: int) -> int:
+    """Mapeia prioridade para Business Value no Scrum."""
+    if priority == 1:
+        return 100
+    elif priority == 2:
+        return 80
+    elif priority == 3:
+        return 50
+    return 20
+
+
+def _parse_story_points(raw_effort: str) -> float:
+    """Extrai valor numérico de Story Points."""
+    if not raw_effort:
+        return 0.0
+    cleaned = raw_effort.replace("`", "").replace("'", "").replace('"', "")
+    match = re.search(r"(\d+(?:\.\d+)?)", cleaned)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _parse_tags(raw_tags: str) -> List[str]:
+    """Separa tags por vírgula ou ponto-e-vírgula e limpa crases/espaços."""
+    if not raw_tags:
+        return []
+    cleaned = raw_tags.replace("`", "").replace("'", "").replace('"', "").replace(";", ",")
+    tags = [t.strip() for t in cleaned.split(",") if t.strip()]
+    return tags
+
+
+def parse_backlog_markdown(file_path: str) -> BacklogDocument:
+    """
+    Lê um arquivo Markdown e extrai a hierarquia de Epics, Features, PBIs e Tasks,
+    separando estritamente Description de Acceptance Criteria e calculando Effort/Business Value.
+    """
+    with open(file_path, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    lines = content.split("\n")
+
+    discipline = "Geral"
+    epic_title = ""
+    epic_tags = []
+
+
+    # 1. Procura metadados do cabeçalho
+    for line in lines[:30]:
+        disc_match = re.search(r">\s*\*\*Disciplina:\*\*\s*(.+)", line, re.IGNORECASE)
+        if disc_match:
+            discipline = disc_match.group(1).strip()
+
+        epic_match = re.search(r">\s*\*\*Epic Principal:\*\*\s*`?([^`\n]+)`?", line, re.IGNORECASE)
+        if epic_match:
+            epic_title = epic_match.group(1).strip()
+
+    if not epic_title:
+        for line in lines:
+            m = re.search(r"^#+\s*(?:[^\w\s\[]*\s*)?(?:\[EPIC\]|\[EPIC-[^\]]+\]|Epic:?)\s*(.+)", line, re.IGNORECASE)
+            if m:
+                epic_title = m.group(1).strip()
+                break
+
+    if not epic_title:
+        for line in lines:
+            if line.startswith("# "):
+                epic_title = line.replace("# ", "").strip()
+                break
+        if not epic_title:
+            epic_title = f"Epic Backlog Sprint 3 - {discipline}"
+
+    epic_title = clean_title(epic_title)
+
+    epic_item = EpicItem(
+        title=epic_title,
+        description="",
+        acceptance_criteria="",
+        priority=1,
+        business_value=100,
+        tags=epic_tags
+    )
+
+
+    # 2. Pré-mapeamento de Features da árvore se existir
+    feature_map: Dict[str, FeatureItem] = {}
+
+    tree_in_progress = False
+    for line in lines:
+        if "```" in line:
+            tree_in_progress = not tree_in_progress
+            continue
+        if tree_in_progress:
+            feat_tree_match = re.search(r"[├└]──\s*(?:[^\w\s\[]*\s*)?\[?((?:FEATURE|FEAT)[-:\s]*\d+)\]?[:\s]*(.+)", line, re.IGNORECASE)
+            if feat_tree_match:
+                code_raw = feat_tree_match.group(1).strip()
+                name_raw = clean_title(feat_tree_match.group(2).strip())
+                code_norm = re.sub(r"[^a-zA-Z0-9]", "", code_raw).lower()
+                full_feat_title = clean_title(f"[{code_raw.upper()}] {name_raw}")
+                if code_norm not in feature_map:
+                    f_item = FeatureItem(title=full_feat_title, code=code_norm)
+                    feature_map[code_norm] = f_item
+                    epic_item.features.append(f_item)
+
+    # 3. Processa detalhamento de Features e PBIs
+    current_feature: Optional[FeatureItem] = None
+    current_pbi: Optional[PBIItem] = None
+    current_section = None
+    desc_buffer = []
+    acceptance_buffer = []
+    task_buffer = []
+
+    def get_or_create_feature(parent_ref: str) -> FeatureItem:
+        clean_ref = clean_title(parent_ref)
+        code_match = re.search(r"(?:FEAT|FEATURE)[-:\s]*(\d+|[A-Z0-9_-]+)", clean_ref, re.IGNORECASE)
+        code_norm = ""
+        if code_match:
+            code_norm = re.sub(r"[^a-zA-Z0-9]", "", code_match.group(0)).lower()
+        
+        if code_norm and code_norm in feature_map:
+            return feature_map[code_norm]
+
+        for f in epic_item.features:
+            if clean_ref.lower() in f.title.lower() or f.title.lower() in clean_ref.lower():
+                return f
+
+        new_f = FeatureItem(title=clean_ref, code=code_norm)
+        if code_norm:
+            feature_map[code_norm] = new_f
+        epic_item.features.append(new_f)
+        return new_f
+
+    def flush_pbi():
+        nonlocal current_pbi, desc_buffer, acceptance_buffer, task_buffer
+        if current_pbi:
+            # Separação estrita: Description contém User Story; AcceptanceCriteria vai no campo próprio
+            current_pbi.description = _markdown_to_clean_html("\n".join(desc_buffer))
+            current_pbi.acceptance_criteria = _markdown_to_clean_html("\n".join(acceptance_buffer))
+            current_pbi.business_value = _priority_to_business_value(current_pbi.priority)
+
+            for task_line in task_buffer:
+                clean_task = re.sub(r"^(-\s*\[[ xX]\]\s*|[\*\-]\s*)", "", task_line).strip()
+                clean_task = clean_title(clean_task)
+                if clean_task:
+                    current_pbi.tasks.append(TaskItem(
+                        title=clean_task,
+                        tags=current_pbi.tags.copy()
+                    ))
+
+            target_feature = None
+            if current_pbi.parent_feature_ref:
+                target_feature = get_or_create_feature(current_pbi.parent_feature_ref)
+            elif current_feature:
+                target_feature = current_feature
+            elif epic_item.features:
+                target_feature = epic_item.features[-1]
+            else:
+                target_feature = FeatureItem(title="Feature Geral da Sprint 3")
+                epic_item.features.append(target_feature)
+
+            target_feature.pbis.append(current_pbi)
+
+            current_pbi = None
+            desc_buffer = []
+            acceptance_buffer = []
+            task_buffer = []
+
+    def flush_feature():
+        nonlocal current_feature
+        flush_pbi()
+        if current_feature and current_feature not in epic_item.features:
+            epic_item.features.append(current_feature)
+            current_feature = None
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Detecção de Nova Feature no corpo
+        feat_match = re.search(r"^#{2,3}\s+(?:[^\w\s\[]*\s*)?\[?(?:FEATURE|FEAT)[-:\s]*(\d+|[A-Z0-9_-]+)?\]?[:\s]*(.+)", stripped, re.IGNORECASE)
+        if feat_match and not any(k in stripped.lower() for k in ["detalhamento", "tabela resumo", "painel geral", "resumo executivo", "estrutura hierárquica", "estrutura do backlog"]):
+            flush_feature()
+            feat_num = feat_match.group(1) or ""
+            feat_name = clean_title(feat_match.group(2).strip())
+            feat_name = re.sub(r"^\[.*?\]\s*", "", feat_name).strip()
+            
+            if feat_num and not feat_name.lower().startswith("feature"):
+                title = f"Feature {feat_num}: {feat_name}".strip(": ")
+            elif feat_name.lower().startswith("feature"):
+                title = feat_name
+            else:
+                title = f"Feature: {feat_name}"
+            
+            clean_feat_title = clean_title(title)
+            current_feature = get_or_create_feature(clean_feat_title)
+            current_section = None
+            i += 1
+            continue
+
+        # Detecção de Novo PBI
+        pbi_match = re.search(r"^#{3,4}\s+(?:[^\w\s\[]*\s*)?\[?(PBI(?:-[A-Z0-9_-]+|\d+)?)\]?[:\s]*(.+)", stripped, re.IGNORECASE)
+        if pbi_match and not any(k in stripped.lower() for k in ["tabela", "resumo", "detalhamento"]):
+            flush_pbi()
+            pbi_code = pbi_match.group(1).strip()
+            pbi_title = clean_title(pbi_match.group(2).strip())
+            pbi_title = re.sub(r"^\[.*?\]\s*", "", pbi_title).strip()
+            if not pbi_code.startswith("["):
+                pbi_code = f"[{pbi_code}]"
+            full_pbi_title = clean_title(f"{pbi_code} {pbi_title}")
+            current_pbi = PBIItem(title=full_pbi_title)
+            current_section = None
+            i += 1
+            continue
+
+        # Se estamos dentro de um PBI
+        if current_pbi is not None:
+            prio_match = re.search(r"^\*?\s*\*\*Priorit[yáe][^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if prio_match:
+                current_pbi.priority = _parse_priority(prio_match.group(1))
+                i += 1
+                continue
+
+            effort_match = re.search(r"^\*?\s*\*\*(?:Effort|Story Points|Pontos|Esforço)[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if effort_match:
+                current_pbi.story_points = _parse_story_points(effort_match.group(1))
+                i += 1
+                continue
+
+            tags_match = re.search(r"^\*?\s*\*\*Tags?:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if tags_match:
+                current_pbi.tags = _parse_tags(tags_match.group(1))
+                i += 1
+                continue
+
+            parent_match = re.search(r"^\*?\s*\*\*Parent\s*Feature:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if parent_match:
+                current_pbi.parent_feature_ref = parent_match.group(1).strip()
+                i += 1
+                continue
+
+            # Cabeçalhos de Seções internas do PBI
+            if re.search(r"^#{4,5}\s+.*(?:Descri[çc][ãa]o|User Story|Hist[óo]ria)", stripped, re.IGNORECASE):
+                current_section = 'desc'
+                i += 1
+                continue
+            elif re.search(r"^#{4,5}\s+.*(?:Crit[ée]rios de Aceite|Acceptance Criteria)", stripped, re.IGNORECASE):
+                current_section = 'acceptance'
+                i += 1
+                continue
+            elif re.search(r"^#{4,5}\s+.*(?:Tarefas T[ée]cnicas|Tasks|Child Tasks)", stripped, re.IGNORECASE):
+                current_section = 'tasks'
+                i += 1
+                continue
+
+            # Acumula linhas de acordo com a seção atual
+            if current_section == 'desc':
+                if not stripped.startswith("---") and not stripped.startswith("* **"):
+                    desc_buffer.append(line)
+            elif current_section == 'acceptance':
+                if not stripped.startswith("---") and not stripped.startswith("* **"):
+                    acceptance_buffer.append(line)
+            elif current_section == 'tasks':
+                if stripped.startswith("- [ ]") or stripped.startswith("* [ ]") or stripped.startswith("- ") or stripped.startswith("* **Task"):
+                    task_buffer.append(stripped)
+
+        # Se estamos dentro de uma Feature
+        elif current_feature is not None:
+            tags_match = re.search(r"^\*?\s*\*\*Tags?:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if tags_match:
+                current_feature.tags = _parse_tags(tags_match.group(1))
+                i += 1
+                continue
+
+            desc_match = re.search(r"^\*?\s*\*\*Descri[çc][ãa]o[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if desc_match:
+                current_feature.description = _markdown_to_clean_html(desc_match.group(1))
+                i += 1
+                continue
+
+        # Se estamos no cabeçalho do Epic (antes da primeira feature)
+        elif current_feature is None and current_pbi is None:
+            tags_match = re.search(r"^\*?\s*\*\*Tags?:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if tags_match:
+                epic_item.tags = _parse_tags(tags_match.group(1))
+                i += 1
+                continue
+
+            desc_match = re.search(r"^\*?\s*\*\*Descri[çc][ãa]o[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            if desc_match:
+                epic_item.description = _markdown_to_clean_html(desc_match.group(1))
+                i += 1
+                continue
+
+
+        i += 1
+
+    # Fecha o último PBI e Feature
+    flush_feature()
+
+    # Remove features vazias
+    epic_item.features = [f for f in epic_item.features if f.pbis]
+
+    # Calcula agregações para Features e Epic
+    total_epic_effort = 0.0
+    for feat in epic_item.features:
+        feat_effort = sum(p.story_points for p in feat.pbis)
+        feat.effort = feat_effort
+        total_epic_effort += feat_effort
+
+        # Prioridade da Feature = maior prioridade (menor número) dos seus PBIs
+        if feat.pbis:
+            feat.priority = min(p.priority for p in feat.pbis)
+            feat.business_value = _priority_to_business_value(feat.priority)
+
+    epic_item.effort = total_epic_effort
+
+
+    return BacklogDocument(
+        discipline=discipline,
+        epic=epic_item,
+        raw_file_path=file_path
+    )
