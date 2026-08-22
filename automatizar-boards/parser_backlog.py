@@ -15,7 +15,7 @@ if sys.stdout.encoding != 'utf-8':
 
 def clean_title(text: str) -> str:
     """
-    Remove qualquer emoji, ícone, crases ou símbolo decorativo de títulos para o Azure Boards.
+    Remove qualquer emoji, ícone, crases, asteriscos ou símbolo decorativo de títulos para o Azure Boards.
     Garante títulos 100% limpos e formais.
     """
     if not text:
@@ -23,7 +23,8 @@ def clean_title(text: str) -> str:
     # Remove faixa completa de emojis e símbolos especiais Unicode
     cleaned = re.sub(r"[\U00010000-\U0010ffff]", "", text)  # Emojis 4-byte
     cleaned = re.sub(r"[\u2600-\u27BF\u2300-\u23FF\u2B50-\u2B55\u200d\uFE0F\u00A9\u00AE]", "", cleaned)  # Símbolos, dingbats
-    cleaned = cleaned.replace("`", "").replace("'", "").replace('"', "")
+    cleaned = cleaned.replace("`", "").replace("'", "").replace('"', "").replace("**", "").replace("*", "")
+    cleaned = re.sub(r"^\s*-\s*", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -33,6 +34,8 @@ class TaskItem:
     title: str
     description: str = ""
     work_item_type: str = "Task"
+    activity: str = "Development"
+    remaining_work: Optional[float] = None
     tags: List[str] = field(default_factory=list)
 
 
@@ -56,6 +59,8 @@ class FeatureItem:
     code: str = ""
     description: str = ""
     acceptance_criteria: str = ""
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
     effort: float = 0.0
     priority: int = 1
     business_value: int = 100
@@ -69,6 +74,8 @@ class EpicItem:
     title: str
     description: str = ""
     acceptance_criteria: str = ""
+    start_date: Optional[str] = None
+    target_date: Optional[str] = None
     effort: float = 0.0
     priority: int = 1
     business_value: int = 100
@@ -191,6 +198,107 @@ def _parse_story_points(raw_effort: str) -> float:
     return 0.0
 
 
+def _parse_date(text: str) -> Optional[str]:
+    """Converte datas em formatos comuns (YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY) para YYYY-MM-DD."""
+    if not text:
+        return None
+    cleaned = text.strip().strip("`").strip('"').strip("'")
+    
+    # YYYY-MM-DD
+    m_iso = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", cleaned)
+    if m_iso:
+        y, m, d = m_iso.groups()
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    
+    # DD/MM/YYYY
+    m_br = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})", cleaned)
+    if m_br:
+        d, m, y = m_br.groups()
+        return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+    
+    return None
+
+
+def _normalize_activity(text: str) -> str:
+    """Normaliza o tipo de atividade para os padrões oficiais do Scrum Process Template no Azure Boards."""
+    if not text:
+        return "Development"
+    t = text.strip().lower()
+    if any(k in t for k in ["test", "qa", "valida", "homologa"]):
+        return "Testing"
+    if any(k in t for k in ["design", "ui", "ux", "layout", "protótipo", "prototipo"]):
+        return "Design"
+    if any(k in t for k in ["doc", "readme", "apresenta", "vídeo", "video", "pitch", "relat"]):
+        return "Documentation"
+    if any(k in t for k in ["req", "requisito", "planejamento", "analise", "análise"]):
+        return "Requirements"
+    if any(k in t for k in ["deploy", "infra", "cloud", "iac", "pipeline", "ci/cd", "azure", "docker"]):
+        return "Deployment"
+    if any(k in t for k in ["dev", "desenvolvimento", "código", "backend", "frontend", "api", "crud", "refator"]):
+        return "Development"
+    return "Development"
+
+
+def _parse_task_line(task_line: str, default_tags: List[str]) -> Optional[TaskItem]:
+    """
+    Extrai título limpo, Activity e Remaining Work (horas) a partir de uma linha de Task.
+    Formatos suportados:
+    - * **Task 1.1:** [TASK-01] Executar script. *(Activity: Testing, Est: 1.0h)*
+    - * **Task 1.1:** Criar endpoints. *(2.0h)*
+    - - [ ] [TASK-01] Executar script *(Activity: Testing)*
+    """
+    clean_line = re.sub(r"^(-\s*\[[ xX]\]\s*|[\*\-]\s*)", "", task_line).strip()
+    if not clean_line:
+        return None
+
+    activity = "Development"
+    remaining_work = None
+
+    # Procura anotações entre parênteses: *(Activity: Testing, Est: 1.5h)* ou *(2.0h)*
+    paren_match = re.search(r"\*\((.*?)\)\*|\((.*?)\)$", clean_line)
+    if paren_match:
+        paren_content = (paren_match.group(1) or paren_match.group(2) or "").strip()
+        
+        # Extrai Activity
+        act_match = re.search(r"(?:Activity|Atividade)[:\s]*([a-zA-Z\s/]+)", paren_content, re.IGNORECASE)
+        if act_match:
+            activity = _normalize_activity(act_match.group(1))
+        
+        # Extrai Horas / Remaining Work
+        hours_match = re.search(r"(\d+(?:\.\d+)?)\s*h(?:oras)?", paren_content, re.IGNORECASE)
+        if hours_match:
+            try:
+                remaining_work = float(hours_match.group(1))
+            except ValueError:
+                pass
+
+        # Remove o bloco de parênteses do título da task para mantê-lo limpo
+        clean_line = clean_line[:paren_match.start()].strip()
+
+    # Limpeza do título
+    title = clean_title(clean_line)
+    if not title:
+        return None
+
+    # Inferência inteligente de Activity pelo título se não foi declarado explicitamente
+    if activity == "Development":
+        if any(k in title.lower() for k in ["test", "validar", "auditar", "evidência"]):
+            activity = "Testing"
+        elif any(k in title.lower() for k in ["readme", "documentação", "vídeo", "video", "roteiro"]):
+            activity = "Documentation"
+        elif any(k in title.lower() for k in ["docker", "deploy", "azure", "iac", "ci/cd"]):
+            activity = "Deployment"
+        elif any(k in title.lower() for k in ["design", "ui", "layout", "componentes visuais"]):
+            activity = "Design"
+
+    return TaskItem(
+        title=title,
+        activity=activity,
+        remaining_work=remaining_work,
+        tags=default_tags.copy()
+    )
+
+
 def _parse_tags(raw_tags: str) -> List[str]:
     """Separa tags por vírgula ou ponto-e-vírgula e limpa crases/espaços."""
     if not raw_tags:
@@ -251,6 +359,15 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
         tags=epic_tags
     )
 
+    for line in lines[:30]:
+        start_m = re.search(r">\s*\*\*(?:Start Date|Data de In[íi]cio)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", line, re.IGNORECASE)
+        if start_m:
+            epic_item.start_date = _parse_date(start_m.group(1))
+
+        target_m = re.search(r">\s*\*\*(?:Target Date|End Date|Data de T[ée]rmino|Data Alvo)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", line, re.IGNORECASE)
+        if target_m:
+            epic_item.target_date = _parse_date(target_m.group(1))
+
 
     # 2. Pré-mapeamento de Features da árvore se existir
     feature_map: Dict[str, FeatureItem] = {}
@@ -261,12 +378,17 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             tree_in_progress = not tree_in_progress
             continue
         if tree_in_progress:
-            feat_tree_match = re.search(r"[├└]──\s*(?:[^\w\s\[]*\s*)?\[?((?:FEATURE|FEAT)[-:\s]*\d+)\]?[:\s]*(.+)", line, re.IGNORECASE)
+            feat_tree_match = re.search(r"[├└]──\s*(?:[^\w\s\[]*\s*)?\[?(?:FEATURE|FEAT)[-:\s]*(\d+|[A-Z0-9_-]+)\]?[:\s]*(.+)", line, re.IGNORECASE)
             if feat_tree_match:
-                code_raw = feat_tree_match.group(1).strip()
+                raw_num = feat_tree_match.group(1).strip()
                 name_raw = clean_title(feat_tree_match.group(2).strip())
-                code_norm = re.sub(r"[^a-zA-Z0-9]", "", code_raw).lower()
-                full_feat_title = clean_title(f"[{code_raw.upper()}] {name_raw}")
+                if raw_num.isdigit():
+                    code_norm = f"feature{int(raw_num):02d}"
+                    code_display = f"FEATURE {int(raw_num):02d}"
+                else:
+                    code_norm = re.sub(r"[^a-zA-Z0-9]", "", f"feature{raw_num}").lower()
+                    code_display = f"FEATURE {raw_num.upper()}"
+                full_feat_title = clean_title(f"[{code_display}] {name_raw}")
                 if code_norm not in feature_map:
                     f_item = FeatureItem(title=full_feat_title, code=code_norm)
                     feature_map[code_norm] = f_item
@@ -282,15 +404,23 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
 
     def get_or_create_feature(parent_ref: str) -> FeatureItem:
         clean_ref = clean_title(parent_ref)
-        code_match = re.search(r"(?:FEAT|FEATURE)[-:\s]*(\d+|[A-Z0-9_-]+)", clean_ref, re.IGNORECASE)
+        
+        # 1. Procura número da Feature (ex: Feature 01, FEAT-02, etc.)
+        code_match = re.search(r"(?:FEATURE|FEAT)\s*[-:\s]*\s*(\d+)", clean_ref, re.IGNORECASE)
         code_norm = ""
         if code_match:
-            code_norm = re.sub(r"[^a-zA-Z0-9]", "", code_match.group(0)).lower()
-        
+            code_norm = f"feature{int(code_match.group(1)):02d}"
+        else:
+            code_alt = re.search(r"(?:FEATURE|FEAT)\s*[-:\s]*\s*([A-Z0-9_-]+)", clean_ref, re.IGNORECASE)
+            if code_alt:
+                code_norm = re.sub(r"[^a-zA-Z0-9]", "", code_alt.group(0)).lower()
+
         if code_norm and code_norm in feature_map:
             return feature_map[code_norm]
 
         for f in epic_item.features:
+            if f.code and code_norm and f.code == code_norm:
+                return f
             if clean_ref.lower() in f.title.lower() or f.title.lower() in clean_ref.lower():
                 return f
 
@@ -309,13 +439,9 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             current_pbi.business_value = _priority_to_business_value(current_pbi.priority)
 
             for task_line in task_buffer:
-                clean_task = re.sub(r"^(-\s*\[[ xX]\]\s*|[\*\-]\s*)", "", task_line).strip()
-                clean_task = clean_title(clean_task)
-                if clean_task:
-                    current_pbi.tasks.append(TaskItem(
-                        title=clean_task,
-                        tags=current_pbi.tags.copy()
-                    ))
+                task_item = _parse_task_line(task_line, current_pbi.tags)
+                if task_item:
+                    current_pbi.tasks.append(task_item)
 
             target_feature = None
             if current_pbi.parent_feature_ref:
@@ -355,7 +481,9 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             feat_name = clean_title(feat_match.group(2).strip())
             feat_name = re.sub(r"^\[.*?\]\s*", "", feat_name).strip()
             
-            if feat_num and not feat_name.lower().startswith("feature"):
+            if feat_num and feat_num.isdigit():
+                title = f"Feature {int(feat_num):02d}: {feat_name}".strip(": ")
+            elif feat_num:
                 title = f"Feature {feat_num}: {feat_name}".strip(": ")
             elif feat_name.lower().startswith("feature"):
                 title = feat_name
@@ -370,7 +498,7 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
 
         # Detecção de Novo PBI
         pbi_match = re.search(r"^#{3,4}\s+(?:[^\w\s\[]*\s*)?\[?(PBI(?:-[A-Z0-9_-]+|\d+)?)\]?[:\s]*(.+)", stripped, re.IGNORECASE)
-        if pbi_match and not any(k in stripped.lower() for k in ["tabela", "resumo", "detalhamento"]):
+        if pbi_match:
             flush_pbi()
             pbi_code = pbi_match.group(1).strip()
             pbi_title = clean_title(pbi_match.group(2).strip())
@@ -436,6 +564,18 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
 
         # Se estamos dentro de uma Feature
         elif current_feature is not None:
+            start_date_match = re.search(r"^(?:[>\*\s]*)\*\*(?:Start Date|Data de In[íi]cio)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", stripped, re.IGNORECASE)
+            if start_date_match:
+                current_feature.start_date = _parse_date(start_date_match.group(1))
+                i += 1
+                continue
+
+            target_date_match = re.search(r"^(?:[>\*\s]*)\*\*(?:Target Date|End Date|Data de T[ée]rmino|Data Alvo)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", stripped, re.IGNORECASE)
+            if target_date_match:
+                current_feature.target_date = _parse_date(target_date_match.group(1))
+                i += 1
+                continue
+
             tags_match = re.search(r"^\*?\s*\*\*Tags?:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
             if tags_match:
                 current_feature.tags = _parse_tags(tags_match.group(1))
@@ -450,6 +590,18 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
 
         # Se estamos no cabeçalho do Epic (antes da primeira feature)
         elif current_feature is None and current_pbi is None:
+            start_date_match = re.search(r"^(?:[>\*\s]*)\*\*(?:Start Date|Data de In[íi]cio)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", stripped, re.IGNORECASE)
+            if start_date_match:
+                epic_item.start_date = _parse_date(start_date_match.group(1))
+                i += 1
+                continue
+
+            target_date_match = re.search(r"^(?:[>\*\s]*)\*\*(?:Target Date|End Date|Data de T[ée]rmino|Data Alvo)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", stripped, re.IGNORECASE)
+            if target_date_match:
+                epic_item.target_date = _parse_date(target_date_match.group(1))
+                i += 1
+                continue
+
             tags_match = re.search(r"^\*?\s*\*\*Tags?:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
             if tags_match:
                 epic_item.tags = _parse_tags(tags_match.group(1))
