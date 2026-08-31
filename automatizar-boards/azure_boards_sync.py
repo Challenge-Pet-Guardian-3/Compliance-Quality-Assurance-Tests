@@ -38,6 +38,20 @@ def get_discipline_tag(discipline: str) -> str:
     return "Sprint3"
 
 
+def get_discipline_iteration_path(discipline: str, project_name: str = "Pet-Guardian-Sprint-3") -> str:
+    """
+    Retorna o IterationPath oficial no Azure Boards:
+    - Semana 1 (2026-08-23 a 2026-08-29): Mobile, Java Advanced, Database Advanced
+    - Semana 2 (2026-08-30 a 2026-09-05): DevOps Tools, Disruptive Architectures, .NET
+    """
+    d = (discipline or "").lower()
+    if any(k in d for k in ["mobile", "java", "database", "data", "banco", "plsql"]):
+        return f"{project_name}\\Release 1 - Sprint 3\\Semana 1"
+    if any(k in d for k in ["devops", "cloud", "disruptive", "iot", "ia", "iob", ".net", "dotnet"]):
+        return f"{project_name}\\Release 1 - Sprint 3\\Semana 2"
+    return f"{project_name}\\Release 1 - Sprint 3\\Semana 1"
+
+
 class AzureBoardsClient:
     def __init__(self, organization: str, project: str, pat: Optional[str] = None):
         self.organization = organization.strip()
@@ -118,11 +132,12 @@ class AzureBoardsClient:
         business_value: Optional[int] = None,
         value_area: str = "Business",
         tags: Optional[List[str]] = None,
+        iteration_path: Optional[str] = None,
         parent_id: Optional[int] = None,
         dry_run: bool = False
     ) -> Dict[str, Any]:
         """
-        Cria um Work Item no Azure Boards com campos dedicados (Description, Acceptance Criteria, Effort, Business Value, Dates, Activity).
+        Cria um Work Item no Azure Boards com campos dedicados (Description, Acceptance Criteria, Effort, Business Value, Dates, Activity, IterationPath).
         """
         clean_item_title = clean_title(title)
         
@@ -134,7 +149,8 @@ class AzureBoardsClient:
                 "url": f"https://dev.azure.com/{self.organization}/{self.project}/_workitems/edit/{sim_id}",
                 "fields": {
                     "System.Title": clean_item_title,
-                    "System.WorkItemType": work_item_type
+                    "System.WorkItemType": work_item_type,
+                    "System.IterationPath": iteration_path or self.project
                 }
             }
 
@@ -236,7 +252,15 @@ class AzureBoardsClient:
                 "value": "; ".join(tags)
             })
 
-        # 10. Vínculo hierárquico com o item Pai (Parent Link)
+        # 10. Iteration Path (Semana 1 / Semana 2)
+        if iteration_path:
+            patch_document.append({
+                "op": "add",
+                "path": "/fields/System.IterationPath",
+                "value": iteration_path
+            })
+
+        # 11. Vínculo hierárquico com o item Pai (Parent Link)
         if parent_id:
             parent_url = f"https://dev.azure.com/{self.organization}/{self.project}/_apis/wit/workitems/{parent_id}"
 
@@ -274,24 +298,26 @@ class AzureBoardsClient:
     def sync_backlog(self, doc: BacklogDocument, dry_run: bool = False) -> Dict[str, Any]:
         """
         Sincroniza um documento de backlog completo (Epic ➔ Features ➔ PBIs ➔ Tasks).
-        Mantém estritamente UMA ÚNICA tag padronizada por matéria em todos os itens.
+        Mantém estritamente UMA ÚNICA tag padronizada por matéria e o IterationPath correto.
         """
         prefix = "[DRY-RUN] " if dry_run else ""
         discipline_tag = get_discipline_tag(doc.discipline)
         item_tags = [discipline_tag]
+        iteration_path = get_discipline_iteration_path(doc.discipline, self.project)
 
         print(f"\n========================================================")
         print(f"🚀 {prefix}Iniciando Sincronização: {doc.discipline}")
         print(f"🏷️ Tag Única da Matéria: [{discipline_tag}]")
+        print(f"📅 Iteration Path: [{iteration_path}]")
         print(f"🏛️ Organização: {self.organization} | Projeto: {self.project}")
         print(f"========================================================")
 
         stats = {"epics": 0, "features": 0, "pbis": 0, "tasks": 0, "errors": 0}
 
-        # 1. Cria o Epic com Effort, Business Value, Dates e Acceptance Criteria
+        # 1. Cria o Epic com Effort, Business Value, Dates, Acceptance Criteria e IterationPath
         epic = doc.epic
         date_str = f" | Dates: {epic.start_date} -> {epic.target_date}" if epic.start_date and epic.target_date else ""
-        print(f"\n👑 Criando Epic: {epic.title} (Effort: {epic.effort} SP | Business Value: {epic.business_value}{date_str} | Tag: {discipline_tag})")
+        print(f"\n👑 Criando Epic: {epic.title} (Effort: {epic.effort} SP | Business Value: {epic.business_value}{date_str} | Tag: {discipline_tag} | Iteration: {iteration_path})")
         epic_res = self.create_work_item(
             work_item_type="Epic",
             title=epic.title,
@@ -303,13 +329,14 @@ class AzureBoardsClient:
             effort=epic.effort,
             business_value=epic.business_value,
             tags=item_tags,
+            iteration_path=iteration_path,
             dry_run=dry_run
         )
         epic_id = epic_res.get("id")
         stats["epics"] += 1
         print(f"   └── ✅ Epic #{epic_id} criado com sucesso!")
 
-        # 2. Cria as Features com Effort, Business Value, Dates e Acceptance Criteria vinculadas ao Epic
+        # 2. Cria as Features com Effort, Business Value, Dates, Acceptance Criteria e IterationPath vinculadas ao Epic
         for f_idx, feat in enumerate(epic.features, 1):
             feat_date_str = f" | Dates: {feat.start_date} -> {feat.target_date}" if feat.start_date and feat.target_date else ""
             print(f"\n   🏆 [{f_idx}/{len(epic.features)}] Criando Feature: {feat.title} (Effort: {feat.effort} SP | Business Value: {feat.business_value}{feat_date_str})")
@@ -324,6 +351,7 @@ class AzureBoardsClient:
                 effort=feat.effort,
                 business_value=feat.business_value,
                 tags=item_tags,
+                iteration_path=iteration_path,
                 parent_id=epic_id,
                 dry_run=dry_run
             )
@@ -331,7 +359,7 @@ class AzureBoardsClient:
             stats["features"] += 1
             print(f"       └── ✅ Feature #{feat_id} vinculada ao Epic #{epic_id}")
 
-            # 3. Cria os PBIs com Description limpa e Acceptance Criteria no campo dedicado
+            # 3. Cria os PBIs com Description limpa, Acceptance Criteria no campo dedicado e IterationPath
             for p_idx, pbi in enumerate(feat.pbis, 1):
                 print(f"       ├── 📄 [{p_idx}/{len(feat.pbis)}] PBI: {pbi.title} ({pbi.story_points} SP | Prio {pbi.priority} | BV: {pbi.business_value})")
                 pbi_res = self.create_work_item(
@@ -343,13 +371,14 @@ class AzureBoardsClient:
                     effort=pbi.story_points,
                     business_value=pbi.business_value,
                     tags=item_tags,
+                    iteration_path=iteration_path,
                     parent_id=feat_id,
                     dry_run=dry_run
                 )
                 pbi_id = pbi_res.get("id")
                 stats["pbis"] += 1
 
-                # 4. Cria as Tasks vinculadas ao PBI com Activity e RemainingWork
+                # 4. Cria as Tasks vinculadas ao PBI com Activity, RemainingWork e IterationPath
                 for t_idx, task in enumerate(pbi.tasks, 1):
                     rem_str = f" | {task.remaining_work}h" if task.remaining_work else ""
                     print(f"           🔨 [{t_idx}/{len(pbi.tasks)}] Task: {task.title} (Activity: {task.activity}{rem_str})")
@@ -360,6 +389,7 @@ class AzureBoardsClient:
                         activity=task.activity,
                         remaining_work=task.remaining_work,
                         tags=item_tags,
+                        iteration_path=iteration_path,
                         parent_id=pbi_id,
                         dry_run=dry_run
                     )

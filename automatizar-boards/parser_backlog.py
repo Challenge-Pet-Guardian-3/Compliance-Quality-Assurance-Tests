@@ -98,52 +98,59 @@ def _markdown_to_clean_html(text: str) -> str:
     if not text:
         return ""
     
-    lines = text.strip().split("\n")
-    html_parts = []
-    in_list = False
-    paragraph_buffer = []
-
-    def flush_paragraph():
-        nonlocal paragraph_buffer
-        if paragraph_buffer:
-            p_text = "<br/>".join(paragraph_buffer)
-            html_parts.append(f"<div>{p_text}</div>")
-            paragraph_buffer = []
-
-
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if in_list:
-                html_parts.append("</ul>")
-                in_list = False
-            flush_paragraph()
+    clean_lines = []
+    in_user_story = False
+    story_lines = []
+    
+    for raw_line in text.split("\n"):
+        line = raw_line.strip()
+        if not line:
+            if story_lines:
+                clean_lines.append("<div>" + "<br/>".join(story_lines) + "</div>")
+                story_lines = []
+                in_user_story = False
             continue
-
-        # Lista de itens (- [ ], * ou -)
-        if stripped.startswith("- [ ]") or stripped.startswith("- [x]") or stripped.startswith("* ") or stripped.startswith("- "):
-            flush_paragraph()
-            if not in_list:
-                html_parts.append("<ul>")
-                in_list = True
-            item_text = re.sub(r"^(-\s*\[[ xX]\]\s*|[\*\-]\s*)", "", stripped)
-            item_text = _format_inline_markdown(item_text)
-            html_parts.append(f"<li>{item_text}</li>")
-        else:
-            if in_list:
-                html_parts.append("</ul>")
-                in_list = False
             
-            # Remove marcadores de citação (>) para não gerar barras laterais azuis
-            clean_line = re.sub(r"^>\s*", "", stripped)
-            formatted_line = _format_inline_markdown(clean_line)
-            paragraph_buffer.append(formatted_line)
-
-    if in_list:
-        html_parts.append("</ul>")
-    flush_paragraph()
-
-    return "".join(html_parts)
+        # Ignora linhas decorativas ou títulos redundantes
+        if line.startswith("---") or line.startswith("===") or re.match(r"^#{1,6}\s+", line):
+            continue
+            
+        # Remove marcas de citação (>)
+        line = re.sub(r"^>\s*", "", line).strip()
+        
+        # Detecta linhas de História de Usuário (Como / Eu quero / Para que)
+        if re.match(r"^\*\*(?:Como|Eu quero|Para que|Para)\*\*", line, re.IGNORECASE) or \
+           re.match(r"^(?:Como|Eu quero|Para que|Para)\b", line, re.IGNORECASE):
+            in_user_story = True
+            story_lines.append(_format_inline_markdown(line))
+            continue
+            
+        if in_user_story and story_lines:
+            story_lines.append(_format_inline_markdown(line))
+            continue
+            
+        # Linhas de lista com checkboxes ou marcadores
+        if re.match(r"^[-\*]\s*\[[ xX]\]\s*", line):
+            content = re.sub(r"^[-\*]\s*\[[ xX]\]\s*", "", line)
+            clean_lines.append(f"<li>{_format_inline_markdown(content)}</li>")
+        elif re.match(r"^[-\*]\s+", line):
+            content = re.sub(r"^[-\*]\s+", "", line)
+            clean_lines.append(f"<li>{_format_inline_markdown(content)}</li>")
+        elif re.match(r"^\d+\.\s+", line):
+            content = re.sub(r"^\d+\.\s+", "", line)
+            clean_lines.append(f"<li>{_format_inline_markdown(content)}</li>")
+        else:
+            clean_lines.append(f"<p>{_format_inline_markdown(line)}</p>")
+            
+    if story_lines:
+        clean_lines.append("<div>" + "<br/>".join(story_lines) + "</div>")
+        
+    result = "\n".join(clean_lines)
+    # Envelopa listas <li> consecutivas em <ul>
+    if "<li>" in result:
+        result = re.sub(r"((?:<li>.*?</li>\n?)+)", r"<ul>\n\1</ul>", result, flags=re.DOTALL)
+        
+    return result.strip()
 
 
 def _format_inline_markdown(text: str) -> str:
@@ -251,51 +258,37 @@ def _parse_task_line(task_line: str, default_tags: List[str]) -> Optional[TaskIt
     if not clean_line:
         return None
 
-    activity = "Development"
+    # Extrai horas estimadas
     remaining_work = None
+    hours_match = re.search(r"\((?:Est(?:imativa)?:?\s*)?(\d+(?:\.\d+)?)\s*h(?:oras?)?[^\)]*\)", clean_line, re.IGNORECASE)
+    if hours_match:
+        try:
+            remaining_work = float(hours_match.group(1))
+        except ValueError:
+            pass
 
-    # Procura anotações entre parênteses: *(Activity: Testing, Est: 1.5h)* ou *(2.0h)*
-    paren_match = re.search(r"\*\((.*?)\)\*|\((.*?)\)$", clean_line)
-    if paren_match:
-        paren_content = (paren_match.group(1) or paren_match.group(2) or "").strip()
-        
-        # Extrai Activity
-        act_match = re.search(r"(?:Activity|Atividade)[:\s]*([a-zA-Z\s/]+)", paren_content, re.IGNORECASE)
-        if act_match:
-            activity = _normalize_activity(act_match.group(1))
-        
-        # Extrai Horas / Remaining Work
-        hours_match = re.search(r"(\d+(?:\.\d+)?)\s*h(?:oras)?", paren_content, re.IGNORECASE)
-        if hours_match:
-            try:
-                remaining_work = float(hours_match.group(1))
-            except ValueError:
-                pass
+    # Extrai atividade
+    activity = "Development"
+    activity_match = re.search(r"Activity:\s*([A-Za-z]+)", clean_line, re.IGNORECASE)
+    if activity_match:
+        activity = _normalize_activity(activity_match.group(1))
+    else:
+        activity = _normalize_activity(clean_line)
 
-        # Remove o bloco de parênteses do título da task para mantê-lo limpo
-        clean_line = clean_line[:paren_match.start()].strip()
+    # Limpa o título da task removendo sufixos de anotações
+    title_part = re.sub(r"\*?\([^\)]*(?:h|Activity|Est)[^\)]*\)\*?", "", clean_line).strip()
+    title_part = clean_title(title_part)
 
-    # Limpeza do título
-    title = clean_title(clean_line)
-    if not title:
+    if not title_part:
         return None
 
-    # Inferência inteligente de Activity pelo título se não foi declarado explicitamente
-    if activity == "Development":
-        if any(k in title.lower() for k in ["test", "validar", "auditar", "evidência"]):
-            activity = "Testing"
-        elif any(k in title.lower() for k in ["readme", "documentação", "vídeo", "video", "roteiro"]):
-            activity = "Documentation"
-        elif any(k in title.lower() for k in ["docker", "deploy", "azure", "iac", "ci/cd"]):
-            activity = "Deployment"
-        elif any(k in title.lower() for k in ["design", "ui", "layout", "componentes visuais"]):
-            activity = "Design"
-
     return TaskItem(
-        title=title,
+        title=title_part,
+        description="",
+        work_item_type="Task",
         activity=activity,
         remaining_work=remaining_work,
-        tags=default_tags.copy()
+        tags=list(default_tags)
     )
 
 
@@ -321,7 +314,6 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
     discipline = "Geral"
     epic_title = ""
     epic_tags = []
-
 
     # 1. Procura metadados do cabeçalho
     for line in lines[:30]:
@@ -367,7 +359,6 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
         target_m = re.search(r">\s*\*\*(?:Target Date|End Date|Data de T[ée]rmino|Data Alvo)[^\*]*:?\*\*:?\s*`?([^`\n]+)`?", line, re.IGNORECASE)
         if target_m:
             epic_item.target_date = _parse_date(target_m.group(1))
-
 
     # 2. Pré-mapeamento de Features da árvore se existir
     feature_map: Dict[str, FeatureItem] = {}
@@ -473,6 +464,15 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
         line = lines[i]
         stripped = line.strip()
 
+        # Detecção de Cabeçalho do Épico na Seção 4 (ex: ### 🏛️ ÉPICO)
+        if re.search(r"^#{2,3}\s+.*(?:[ÉE]PICO|EPIC)\b", stripped, re.IGNORECASE) and not any(k in stripped.lower() for k in ["feature", "detalhamento", "tabela resumo", "painel geral"]):
+            flush_feature()
+            current_feature = None
+            current_pbi = None
+            current_section = None
+            i += 1
+            continue
+
         # Detecção de Nova Feature no corpo
         feat_match = re.search(r"^#{2,3}\s+(?:[^\w\s\[]*\s*)?\[?(?:FEATURE|FEAT)[-:\s]*(\d+|[A-Z0-9_-]+)?\]?[:\s]*(.+)", stripped, re.IGNORECASE)
         if feat_match and not any(k in stripped.lower() for k in ["detalhamento", "tabela resumo", "painel geral", "resumo executivo", "estrutura hierárquica", "estrutura do backlog"]):
@@ -482,9 +482,9 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             feat_name = re.sub(r"^\[.*?\]\s*", "", feat_name).strip()
             
             if feat_num and feat_num.isdigit():
-                title = f"Feature {int(feat_num):02d}: {feat_name}".strip(": ")
+                title = f"[FEATURE {int(feat_num):02d}] {feat_name}"
             elif feat_num:
-                title = f"Feature {feat_num}: {feat_name}".strip(": ")
+                title = f"[FEATURE {feat_num}] {feat_name}"
             elif feat_name.lower().startswith("feature"):
                 title = feat_name
             else:
@@ -538,7 +538,7 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
                 continue
 
             # Cabeçalhos de Seções internas do PBI
-            if re.search(r"^#{4,5}\s+.*(?:Descri[çc][ãa]o|User Story|Hist[óo]ria)", stripped, re.IGNORECASE):
+            if re.search(r"^#{4,5}\s+.*(?:Descri[çc][ãa]o|Description|User Story|Hist[óo]ria)", stripped, re.IGNORECASE):
                 current_section = 'desc'
                 i += 1
                 continue
@@ -582,7 +582,7 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
                 i += 1
                 continue
 
-            desc_match = re.search(r"^\*?\s*\*\*Descri[çc][ãa]o[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            desc_match = re.search(r"^\*?\s*\*\*(?:Descri[çc][ãa]o|Description)[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
             if desc_match:
                 current_feature.description = _markdown_to_clean_html(desc_match.group(1))
                 i += 1
@@ -608,12 +608,11 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
                 i += 1
                 continue
 
-            desc_match = re.search(r"^\*?\s*\*\*Descri[çc][ãa]o[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
+            desc_match = re.search(r"^\*?\s*\*\*(?:Descri[çc][ãa]o|Description)[^\*]*:?\*\*:?\s*(.+)", stripped, re.IGNORECASE)
             if desc_match:
                 epic_item.description = _markdown_to_clean_html(desc_match.group(1))
                 i += 1
                 continue
-
 
         i += 1
 
@@ -636,7 +635,6 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             feat.business_value = _priority_to_business_value(feat.priority)
 
     epic_item.effort = total_epic_effort
-
 
     return BacklogDocument(
         discipline=discipline,
