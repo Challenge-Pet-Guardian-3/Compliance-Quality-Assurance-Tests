@@ -23,7 +23,7 @@ AZURE_DEVOPS_ORG=PetGuardian
 AZURE_DEVOPS_PROJECT=Pet-Guardian-Sprint-3
 
 # Personal Access Token (PAT) com escopo "Work Items (Read & Write)"
-AZURE_DEVOPS_PAT=zT743glSMA9MhuwNe4qhUEAWNSOfA8eix559Vy0Tok5CKDhi6endJQQJ99CHACAAAAAE8413AAASAZDO4ciR
+AZURE_DEVOPS_PAT=
 ```
 
 > ⚠️ **Nota de Autenticação:**  
