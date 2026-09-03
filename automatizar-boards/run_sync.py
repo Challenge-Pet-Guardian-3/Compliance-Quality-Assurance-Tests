@@ -38,7 +38,8 @@ ALL_DISCIPLINE_FILES = [
     ("../../Advanced-Business-Development-with-Dot-Net/BACKLOG_DOT_NET.md", ".NET & Observabilidade"),
     ("../../Database-Advanced/BACKLOG_DATABASE_ADVANCED.md", "Database Advanced"),
     ("../../DevOps-Tools-Cloud-Computing/BACKLOG_DEVOPS.md", "DevOps Tools & Cloud"),
-    ("../../Disruptive-Architectures-IoT-IoB-IA/BACKLOG_DISRUPTIVE_ARCHITECTURES.md", "Disruptive Architectures (IA/IoT)")
+    ("../../Disruptive-Architectures-IoT-IoB-IA/BACKLOG_DISRUPTIVE_ARCHITECTURES.md", "Disruptive Architectures (IA/IoT)"),
+    ("../BACKLOG_COMPLIANCE.md", "Compliance, Quality Assurance & Tests")
 ]
 
 
@@ -59,6 +60,7 @@ Exemplos de uso:
 
   4. Importar uma matéria específica:
      python run_sync.py --file ../../Mobile-Application-Development/BACKLOG_MOBILE.md
+     python run_sync.py --file ../BACKLOG_COMPLIANCE.md
 
   5. Importar todas as matérias de uma vez no Board unificado:
      python run_sync.py --all
@@ -66,7 +68,7 @@ Exemplos de uso:
     )
 
     parser.add_argument("--file", "-f", type=str, default="teste_backlog_exemplo.md", help="Caminho do arquivo .md a importar (Padrão: teste_backlog_exemplo.md)")
-    parser.add_argument("--all", "-a", action="store_true", help="Importar backlogs de todas as 6 disciplinas do Challenge Sprint 3")
+    parser.add_argument("--all", "-a", action="store_true", help="Importar backlogs de todas as 7 disciplinas do Challenge Sprint 3")
     parser.add_argument("--dry-run", "-d", action="store_true", help="Modo simulação: executa o parser e exibe a hierarquia sem criar work items na nuvem")
     parser.add_argument("--check-auth", "-c", action="store_true", help="Valida se as credenciais e o projeto do Azure DevOps estão acessíveis")
     parser.add_argument("--org", type=str, default=None, help="Nome da organização Azure DevOps (Ex: PetGuardian)")
@@ -97,7 +99,7 @@ Exemplos de uso:
 
     # Modo de execução: Todos ou Arquivo Único
     if args.all:
-        print(f"\n🚀 Modo Selecionado: IMPORTAÇÃO TOTAL DE TODAS AS 6 DISCIPLINAS")
+        print(f"\n🚀 Modo Selecionado: IMPORTAÇÃO TOTAL DE TODAS AS 7 DISCIPLINAS")
         total_stats = {"epics": 0, "features": 0, "pbis": 0, "tasks": 0}
         
         for rel_path, disc_name in ALL_DISCIPLINE_FILES:

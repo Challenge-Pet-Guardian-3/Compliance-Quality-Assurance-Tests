@@ -44,6 +44,7 @@ DISCIPLINE_ITERATION_MAP = {
     "devops": "Release 1 - Sprint 3\\Semana 2",
     "disruptive": "Release 1 - Sprint 3\\Semana 2",
     "dotnet": "Release 1 - Sprint 3\\Semana 2",
+    "compliance": "Release 1 - Sprint 3\\Semana 2",
 }
 
 
@@ -67,6 +68,8 @@ def classify_discipline_from_tags_or_title(tags: str, title: str) -> Optional[st
         return "disruptive"
     if "dotnet" in t_str or ".net" in t_str:
         return "dotnet"
+    if "compliance" in t_str or "qa" in t_str:
+        return "compliance"
         
     # 2. Fallback: Prefixo / Palavras-chave no Título
     title_lower = (title or "").lower()
@@ -82,6 +85,8 @@ def classify_discipline_from_tags_or_title(tags: str, title: str) -> Optional[st
         return "disruptive"
     if ".net" in title_lower or "dotnet" in title_lower or "csharp" in title_lower:
         return "dotnet"
+    if "compliance" in title_lower or "quality assurance" in title_lower or "governança scrum" in title_lower:
+        return "compliance"
         
     return None
 

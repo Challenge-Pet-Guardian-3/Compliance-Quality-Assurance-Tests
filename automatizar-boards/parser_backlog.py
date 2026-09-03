@@ -231,14 +231,14 @@ def _normalize_activity(text: str) -> str:
     if not text:
         return "Development"
     t = text.strip().lower()
-    if any(k in t for k in ["test", "qa", "valida", "homologa"]):
-        return "Testing"
-    if any(k in t for k in ["design", "ui", "ux", "layout", "protótipo", "prototipo"]):
-        return "Design"
-    if any(k in t for k in ["doc", "readme", "apresenta", "vídeo", "video", "pitch", "relat"]):
-        return "Documentation"
     if any(k in t for k in ["req", "requisito", "planejamento", "analise", "análise"]):
         return "Requirements"
+    if any(k in t for k in ["test", "qa", "valida", "homologa"]):
+        return "Testing"
+    if any(k in t for k in ["doc", "readme", "apresenta", "vídeo", "video", "pitch", "relat"]):
+        return "Documentation"
+    if any(k in t for k in ["design", "layout", "protótipo", "prototipo"]) or re.search(r"\b(ui|ux)\b", t):
+        return "Design"
     if any(k in t for k in ["deploy", "infra", "cloud", "iac", "pipeline", "ci/cd", "azure", "docker"]):
         return "Deployment"
     if any(k in t for k in ["dev", "desenvolvimento", "código", "backend", "frontend", "api", "crud", "refator"]):
@@ -260,7 +260,7 @@ def _parse_task_line(task_line: str, default_tags: List[str]) -> Optional[TaskIt
 
     # Extrai horas estimadas
     remaining_work = None
-    hours_match = re.search(r"\((?:Est(?:imativa)?:?\s*)?(\d+(?:\.\d+)?)\s*h(?:oras?)?[^\)]*\)", clean_line, re.IGNORECASE)
+    hours_match = re.search(r"(?:Est(?:imativa)?:?\s*|\b)(\d+(?:\.\d+)?)\s*h(?:oras?)?", clean_line, re.IGNORECASE)
     if hours_match:
         try:
             remaining_work = float(hours_match.group(1))
@@ -473,9 +473,18 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             i += 1
             continue
 
+        # Detecção de Nova Seção de Nível 1 ou 2 que encerra o detalhamento de Work Items
+        if re.match(r"^#{1,2}\s+", stripped) and not any(k in stripped.lower() for k in ["[epic", "épico", "epic:", "feature", "feat"]):
+            flush_feature()
+            current_feature = None
+            current_pbi = None
+            current_section = None
+            i += 1
+            continue
+
         # Detecção de Nova Feature no corpo
         feat_match = re.search(r"^#{2,3}\s+(?:[^\w\s\[]*\s*)?\[?(?:FEATURE|FEAT)[-:\s]*(\d+|[A-Z0-9_-]+)?\]?[:\s]*(.+)", stripped, re.IGNORECASE)
-        if feat_match and not any(k in stripped.lower() for k in ["detalhamento", "tabela resumo", "painel geral", "resumo executivo", "estrutura hierárquica", "estrutura do backlog"]):
+        if feat_match and not any(k in stripped.lower() for k in ["tabela resumo", "painel geral", "resumo executivo", "estrutura hierárquica", "estrutura do backlog"]):
             flush_feature()
             feat_num = feat_match.group(1) or ""
             feat_name = clean_title(feat_match.group(2).strip())

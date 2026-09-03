@@ -21,6 +21,8 @@ if sys.stdout.encoding != 'utf-8':
 def get_discipline_tag(discipline: str) -> str:
     """Retorna a tag única e padronizada para a matéria."""
     d = (discipline or "").lower()
+    if "compliance" in d or "qa" in d:
+        return "Compliance"
     if "java" in d:
         return "JavaAdvanced"
     if "mobile" in d:
@@ -31,10 +33,10 @@ def get_discipline_tag(discipline: str) -> str:
         return "Database"
     if "devops" in d or "cloud" in d:
         return "DevOps"
-    if "disruptive" in d or "iot" in d or "ia" in d or "iob" in d or "arquitetura" in d:
+    if "disruptive" in d or "iot" in d or "iob" in d or "arquitetura" in d:
         return "DisruptiveArchitectures"
-    if "compliance" in d or "test" in d or "qa" in d:
-        return "QA"
+    if "test" in d:
+        return "Compliance"
     return "Sprint3"
 
 
@@ -42,12 +44,12 @@ def get_discipline_iteration_path(discipline: str, project_name: str = "Pet-Guar
     """
     Retorna o IterationPath oficial no Azure Boards:
     - Semana 1 (2026-08-23 a 2026-08-29): Mobile, Java Advanced, Database Advanced
-    - Semana 2 (2026-08-30 a 2026-09-05): DevOps Tools, Disruptive Architectures, .NET
+    - Semana 2 (2026-08-30 a 2026-09-05): DevOps Tools, Disruptive Architectures, .NET, Compliance
     """
     d = (discipline or "").lower()
     if any(k in d for k in ["mobile", "java", "database", "data", "banco", "plsql"]):
         return f"{project_name}\\Release 1 - Sprint 3\\Semana 1"
-    if any(k in d for k in ["devops", "cloud", "disruptive", "iot", "ia", "iob", ".net", "dotnet"]):
+    if any(k in d for k in ["devops", "cloud", "disruptive", "iot", "ia", "iob", ".net", "dotnet", "compliance", "qa", "test"]):
         return f"{project_name}\\Release 1 - Sprint 3\\Semana 2"
     return f"{project_name}\\Release 1 - Sprint 3\\Semana 1"
 

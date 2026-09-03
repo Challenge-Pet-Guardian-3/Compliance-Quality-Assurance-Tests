@@ -44,7 +44,8 @@ ALL_DISCIPLINE_FILES = [
     ("../../Advanced-Business-Development-with-Dot-Net/BACKLOG_DOT_NET.md", ".NET & Observabilidade"),
     ("../../Database-Advanced/BACKLOG_DATABASE_ADVANCED.md", "Database Advanced"),
     ("../../DevOps-Tools-Cloud-Computing/BACKLOG_DEVOPS.md", "DevOps Tools & Cloud"),
-    ("../../Disruptive-Architectures-IoT-IoB-IA/BACKLOG_DISRUPTIVE_ARCHITECTURES.md", "Disruptive Architectures (IA/IoT)")
+    ("../../Disruptive-Architectures-IoT-IoB-IA/BACKLOG_DISRUPTIVE_ARCHITECTURES.md", "Disruptive Architectures (IA/IoT)"),
+    ("../BACKLOG_COMPLIANCE.md", "Compliance, Quality Assurance & Tests")
 ]
 
 

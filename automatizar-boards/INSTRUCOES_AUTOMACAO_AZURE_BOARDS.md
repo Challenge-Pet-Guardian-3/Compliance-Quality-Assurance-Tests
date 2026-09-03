@@ -7,7 +7,7 @@
 
 ## 🎯 1. Visão Geral e Objetivo
 
-Este ecossistema automatiza a leitura e o parsing dos arquivos de Backlog em Markdown das 6 disciplinas do Challenge Sprint 3 e cria a estrutura hierárquica nativa no Azure Boards seguindo o **Processo Scrum**:
+Este ecossistema automatiza a leitura e o parsing dos arquivos de Backlog em Markdown das 7 disciplinas do Challenge Sprint 3 e cria a estrutura hierárquica nativa no Azure Boards seguindo o **Processo Scrum**:
 
 $$\text{Epic} \xrightarrow{\text{Hierarchy-Reverse}} \text{Feature} \xrightarrow{\text{Hierarchy-Reverse}} \text{Product Backlog Item (PBI)} \xrightarrow{\text{Hierarchy-Reverse}} \text{Task}$$
 
@@ -44,6 +44,7 @@ No Azure Boards, cada disciplina está vinculada a uma iteração específica da
 | ☁️ **DevOps Tools & Cloud Computing** | `DevOps` | `Pet-Guardian-Sprint-3\Release 1 - Sprint 3\Semana 2` | 2026-08-30 a 2026-09-05 |
 | 🤖 **Disruptive Architectures (IoT/IA)** | `DisruptiveArchitectures` | `Pet-Guardian-Sprint-3\Release 1 - Sprint 3\Semana 2` | 2026-08-30 a 2026-09-05 |
 | 💻 **.NET & Observabilidade** | `DotNet` | `Pet-Guardian-Sprint-3\Release 1 - Sprint 3\Semana 2` | 2026-08-30 a 2026-09-05 |
+| 🛡️ **Compliance, QA & Tests** | `Compliance` | `Pet-Guardian-Sprint-3\Release 1 - Sprint 3\Semana 2` | 2026-08-30 a 2026-09-05 |
 
 ---
 
@@ -55,7 +56,7 @@ Ao manipular ou estender o parser/sincronizador, qualquer IA **deve respeitar ri
    - Todo título de Epic, Feature, PBI e Task deve passar pela função `clean_title(text)`.
    - Emojis (ex: 👑, 🏆, 🔹, 🧹, 🩺, 🗄️, ☁️, 🤖, 📱, etc.) e crases **devem ser 100% removidos**.
 2. **🏷️ Uma Única Tag Padronizada por Disciplina (`System.Tags`):**
-   - Cada item de trabalho recebe estritamente a tag correspondente (`Mobile`, `JavaAdvanced`, `DotNet`, `Database`, `DevOps`, `DisruptiveArchitectures`).
+   - Cada item de trabalho recebe estritamente a tag correspondente (`Mobile`, `JavaAdvanced`, `DotNet`, `Database`, `DevOps`, `DisruptiveArchitectures`, `Compliance`).
 3. **📅 Atribuição Automática de IterationPath (`System.IterationPath`):**
    - O `azure_boards_sync.py` injeta o caminho da `Semana 1` ou `Semana 2` automaticamente em todos os níveis (Epic, Feature, PBI, Task).
 4. **📄 Separação Estrita de Campos no Azure DevOps:**
@@ -130,6 +131,9 @@ python run_sync.py --file ../../DevOps-Tools-Cloud-Computing/BACKLOG_DEVOPS.md
 
 # Disruptive Architectures (Semana 2)
 python run_sync.py --file ../../Disruptive-Architectures-IoT-IoB-IA/BACKLOG_DISRUPTIVE_ARCHITECTURES.md
+
+# Compliance, QA & Tests (Semana 2)
+python run_sync.py --file ../BACKLOG_COMPLIANCE.md
 ```
 
 ### D. Importação em Lote de Todas as Matérias:
