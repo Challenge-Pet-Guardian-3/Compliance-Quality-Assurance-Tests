@@ -429,10 +429,21 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
             current_pbi.acceptance_criteria = _markdown_to_clean_html("\n".join(acceptance_buffer))
             current_pbi.business_value = _priority_to_business_value(current_pbi.priority)
 
-            for task_line in task_buffer:
-                task_item = _parse_task_line(task_line, current_pbi.tags)
-                if task_item:
-                    current_pbi.tasks.append(task_item)
+            parsed_tasks = []
+            current_task_item = None
+            for raw_t_line in task_buffer:
+                stripped_t = raw_t_line.strip()
+                desc_match = re.search(r"^\*?\s*\*?Descri[çc][ãa]o:?\*?\s*(.+)", stripped_t, re.IGNORECASE)
+                if desc_match:
+                    desc_content = desc_match.group(1).strip().strip("*_").strip()
+                    if current_task_item:
+                        current_task_item.description = _markdown_to_clean_html(desc_content)
+                elif stripped_t.startswith("- [ ]") or stripped_t.startswith("* [ ]") or stripped_t.startswith("- ") or stripped_t.startswith("* **Task") or stripped_t.startswith("* **[TASK") or stripped_t.startswith("* **TASK"):
+                    current_task_item = _parse_task_line(stripped_t, current_pbi.tags)
+                    if current_task_item:
+                        parsed_tasks.append(current_task_item)
+
+            current_pbi.tasks.extend(parsed_tasks)
 
             target_feature = None
             if current_pbi.parent_feature_ref:
@@ -568,7 +579,7 @@ def parse_backlog_markdown(file_path: str) -> BacklogDocument:
                 if not stripped.startswith("---") and not stripped.startswith("* **"):
                     acceptance_buffer.append(line)
             elif current_section == 'tasks':
-                if stripped.startswith("- [ ]") or stripped.startswith("* [ ]") or stripped.startswith("- ") or stripped.startswith("* **Task"):
+                if stripped.startswith("- [ ]") or stripped.startswith("* [ ]") or stripped.startswith("- ") or stripped.startswith("* **Task") or stripped.startswith("* **[TASK") or stripped.startswith("* *Descri") or "descrição:" in stripped.lower() or "descricao:" in stripped.lower():
                     task_buffer.append(stripped)
 
         # Se estamos dentro de uma Feature
