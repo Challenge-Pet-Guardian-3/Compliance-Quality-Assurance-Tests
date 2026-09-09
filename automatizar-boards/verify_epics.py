@@ -50,7 +50,7 @@ def main():
             print("\n--- 👑 ÉPICOS SINCRONIZADOS NO AZURE BOARDS ---")
             for it in b_data.get("value", []):
                 f = it.get("fields", {})
-                eff = f.get("Microsoft.VSTS.Scheduling.Effort", 0.0)
+                eff = f.get("Microsoft.VSTS.Scheduling.Effort") or 0.0
                 total += eff
                 print(f"#{it['id']} | Effort: {eff:4.1f} SP | {f.get('System.Title')}")
             print("==========================================================================")

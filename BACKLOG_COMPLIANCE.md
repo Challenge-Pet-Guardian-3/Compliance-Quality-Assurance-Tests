@@ -78,7 +78,7 @@ O plano de entregas da Sprint 3 foi estruturado com divisão rigorosa em duas fa
 +--------------------------------------------------+------------------------------------------------+
 | SUBTOTAL SEMANA 1: 64 SP | 180.0h                | SUBTOTAL SEMANA 2: 54 SP | 182.0h              |
 +--------------------------------------------------+------------------------------------------------+
-| TOTAL GLOBAL SPRINT 3 (7 DISCIPLINAS): 118 Story Points (Scrum) | 362.0h Líquidas / 370.0h Totais |
+| TOTAL GLOBAL SPRINT 3 (7 DISCIPLINAS): 118 Story Points (Scrum) | 362.0h Totais |
 +---------------------------------------------------------------------------------------------------+
 ```
 

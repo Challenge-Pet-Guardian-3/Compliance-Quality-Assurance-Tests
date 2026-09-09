@@ -195,7 +195,7 @@ class AzureIterationManager:
         print(f"🔄 {prefix}Sincronizador de Iteration Paths no Azure Boards")
         print(f"🏛️ Organização: {self.organization} | Projeto: {self.project}")
         print(f"📅 Semana 1 (2026-08-23 a 2026-08-29): Mobile, Java Advanced, Database Advanced")
-        print(f"📅 Semana 2 (2026-08-30 a 2026-09-05): DevOps Tools, Disruptive Architectures, .NET")
+        print(f"📅 Semana 2 (2026-08-30 a 2026-09-05): DevOps Tools, Disruptive Architectures, .NET, Compliance")
         print(f"========================================================\n")
         
         items = self.fetch_all_work_items()

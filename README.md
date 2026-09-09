@@ -40,7 +40,7 @@
 <td>562290</td>
 <td>2TDSPG</td>
 <td><a href="https://github.com/lunaguima">lunaguima</a></td>
-<td><a href="https://www.linkedin.com/in/luna-m-guimar%C3%A3es-1850ab173/">Luna M. Guimarães</a></td>
+<td><a href="https://www.linkedin.com/in/luna-guimar%C3%A3es-b0ba82309/">Luna Guimarães</a></td>
 </tr>
 
 <tr>
